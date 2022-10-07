@@ -1,13 +1,21 @@
-from typing import Any, Callable, Dict, Optional
+from functools import partial
+from typing import Any, Awaitable, Callable, Dict, Optional
 
-from prefect.utilities.asyncio import A
+from uuid import UUID
+
 
 from openlineage.prefect.adapter import OpenLineageAdapter
-from prefect.executors import BaseExecutor
 from prefect.futures import PrefectFuture
 from prefect.orion.schemas.core import TaskRun
 from prefect.orion.schemas.states import State, StateType
+from prefect.task_runners import BaseTaskRunner, R
 
+#  task=task,
+# task_run=task_run,
+# parameters=parameters,
+# wait_for=wait_for,
+# result_filesystem=flow_run_context.result_filesystem,
+# settings=prefect.context.SettingsContext.get().copy(),
 
 def parse_task_inputs(inputs: Dict):
     def _parse_task_input(x):
@@ -19,37 +27,40 @@ def parse_task_inputs(inputs: Dict):
 
 def on_submit(method, adapter: OpenLineageAdapter):
     async def inner(
-        self: BaseExecutor,
-        task_run: TaskRun,
-        run_fn: Callable[..., State],
-        run_kwargs: Dict[str, Any],
-        asynchronous: A = True,
+        self: BaseTaskRunner,
+        key: UUID,
+        call: Callable[..., Awaitable[State[R]]],
     ) -> PrefectFuture:
-        future = await method(
-            self=self, task_run=task_run, run_fn=run_fn, run_kwargs=run_kwargs, asynchronous=asynchronous,
-        )
-        adapter.start_task(task=run_kwargs["task"], task_run=task_run, run_kwargs=run_kwargs)
+        parital_call: partial = call
+        keywords = parital_call.keywords
+        task = keywords["task"]
+        task_run = keywords["task_run"]
+        parameters : Dict[str, Any] = keywords["parameters"]
+  
+        future = await method(self=self, key=key, call=call)
+        
+        adapter.start_task(task=task, task_run=task_run, run_kwargs=parameters)
         return future
 
     return inner
 
 
 def on_wait(method, adapter: OpenLineageAdapter):
-    async def inner(
-        self: BaseExecutor, prefect_future: PrefectFuture, timeout: float = None
-    ):
-        state = await method(self=self, prefect_future=prefect_future, timeout=timeout)
-        if state.type == StateType.COMPLETED:
-            adapter.complete_task(state=state, future=prefect_future)
-        elif state.TYPE == StateType.FAILED:
-            adapter.fail_task(state=state, future=prefect_future)
+    async def inner(self:BaseTaskRunner,  *args, **kwargs) -> Optional[State]:
+        state: Optional[State] = await method(self=self, *args, **kwargs)
+        if state:
+            if state.type == StateType.COMPLETED:
+                adapter.complete_task(state=state)
+            elif state.type == StateType.FAILED:
+                adapter.fail_task(state=state)
         return state
 
     return inner
 
 
-def track_lineage(cls: BaseExecutor, open_lineage_url: Optional[str] = None):
+def track_lineage(cls: BaseTaskRunner, open_lineage_url: Optional[str] = None):
     adapter = OpenLineageAdapter()
+
     cls.submit = on_submit(cls.submit, adapter=adapter)
     cls.wait = on_wait(cls.wait, adapter=adapter)
     return cls

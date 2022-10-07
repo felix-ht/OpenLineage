@@ -2,9 +2,11 @@ import json
 
 from openlineage.prefect.executor import track_lineage
 from openlineage.prefect.test_utils import RESOURCES
-from prefect import executors, flow, task
+from prefect import  flow, task,task_runners
+from prefect.task_runners import SequentialTaskRunner,ConcurrentTaskRunner
 
-executors.SequentialExecutor = track_lineage(executors.SequentialExecutor)
+task_runners.SequentialTaskRunner = track_lineage(SequentialTaskRunner)
+task_runners.ConcurrentTaskRunner = track_lineage(ConcurrentTaskRunner)
 
 
 @task()

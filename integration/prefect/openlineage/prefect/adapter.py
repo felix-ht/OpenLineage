@@ -13,7 +13,8 @@ from openlineage.client.run import (
 from prefect import State
 from prefect._version import get_versions
 from prefect.futures import PrefectFuture
-from prefect.orion.models.orm import TaskRun
+from prefect.orion.schemas.core import TaskRun
+
 from prefect.tasks import Task
 
 _DEFAULT_NAMESPACE = "default"
@@ -86,7 +87,6 @@ class OpenLineageAdapter:
     def complete_task(
         self,
         state: State,
-        future: PrefectFuture,
         # job_facets: Optional[List[BaseFacet]] = None,
     ):
         """
@@ -108,7 +108,6 @@ class OpenLineageAdapter:
     def fail_task(
             self,
             state: State,
-            future: PrefectFuture,
     ):
         """
         Emits openlineage event of type FAIL
@@ -120,7 +119,7 @@ class OpenLineageAdapter:
             run=self._build_run(str(state.state_details.task_run_id)),
             job=self._build_job(self._job_names[task_run_id]),
             inputs=None,
-            outputs=self._future_to_output(future=future),
+            outputs=self._state_to_output(state=state),
             producer=PRODUCER,
         )
         self.client.emit(event)
